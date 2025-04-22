@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import yahoo_fin.stock_info as si
 import pandas as pd
 from userInfoClass import UserInfo
-import requests
 import numpy as np
 from scipy.stats import linregress
 import datetime
@@ -21,7 +20,7 @@ def get_financial_ratios(ticker_list):
             eps = info.get('trailingEps')
             pe_ratio = info.get('trailingPE')
             ps_ratio = info.get('priceToSalesTrailing12Months')
-            peg_ratio = info.get('pegRatio')
+            peg_ratio = pe_ratio / eps
 
             print(f"Ticker: {ticker_symbol}")
             if price is not None:
@@ -79,48 +78,35 @@ def view_index(tickers):
         main(tickers)
 
 
-def search_ticker_by_name(query):
-    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={query}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-
-        if not data.get("quotes"):
-            print("No results found.")
-            return
-
-        print(f"\nSearch Results for '{query}':")
-        for item in data["quotes"]:
-            symbol = item.get("symbol", "N/A")
-            name = item.get("shortname", item.get("longname", "N/A"))
-            exch = item.get("exchange", "")
-            print(f"{symbol}: {name} ({exch})")
-
-    except Exception as e:
-        print(f"Error during search: {e}")
-
-
-def search_tickers():
+def search_tickers(searchable_tickers, usr_tickers):
     while True:
-        search_sp_lst = input('Would you like to search for a ticker by name? (Y/N): ').strip().upper()
+        search_name = input("Enter the name of the company you're looking for: ").strip()
+        if not search_name:
+            print("Company name cannot be empty.")
+            continue
 
-        if search_sp_lst == 'Y':
-            search_name = input("Enter the name of the company you're looking for: ").strip()
+        results = searchable_tickers[searchable_tickers['Name'].str.contains(search_name, case=False, na=False)]
 
-            print(f"\nSearching Yahoo Finance for: '{search_name}'...\n")
-            results = search_ticker_by_name(search_name)
+        if results.empty:
+            print("No matches found.")
+        else:
+            print("\nMatches found:")
+            print(results[['Symbol', 'Name']].head(10).to_string(index=False))
 
-            if not results:
-                print("No matches found.")
+            selected = input("Enter the ticker symbol to add (or press Enter to skip): ").strip().upper()
+            if selected and selected in results['Symbol'].values:
+                usr_tickers.append(selected)
+                print(f"Added: {selected}")
             else:
-                print("Search Results:")
-                for res in results:
-                    print(f"{res['symbol']}: {res['name']} ({res['exchange']})")
+                print("No ticker added.")
 
-        repeat = input("Search again? (Y/N): ").strip().upper()
-        if repeat != 'Y':
+        main(usr_tickers)
+
+        again = input("Search for another company? (Y/N): ").strip().upper()
+        if again != 'Y':
             break
+
+
 
 def delete_ticker_menu(usr_tickers):
     while True:
@@ -155,26 +141,25 @@ def usr_graphs(usr_tickers):
                     break
             print("Invalid input. Make sure start year is before end year.")
 
-        valid_inputs = {
-            'high': 'High',
-            'low': 'Low',
-            'open': 'Open',
-            'close': 'Close',
-            'high-low difference': 'High-low difference',
-            'close-open difference': 'Close-open difference',
-            'percent change': 'Percent change'
+        input_options = {
+            '1': 'High',
+            '2': 'Low',
+            '3': 'Open',
+            '4': 'Close',
+            '5': 'High-low difference',
+            '6': 'Close-open difference',
+            '7': 'Percent change'
         }
 
+        print("What would you like to graph?")
+        print("1 - High\n2 - Low\n3 - Open\n4 - Close\n5 - High-Low Difference\n6 - Close-Open Difference\n7 - Percent Change")
+
         while True:
-            data_input_raw = input(
-                "What would you like to visualize?\n"
-                "Options: High, Open, Low, Close, High-Low Difference, Close-Open Difference, Percent Change\n"
-                "Your choice: "
-            ).strip().lower()
-            if data_input_raw in valid_inputs:
-                data_input = valid_inputs[data_input_raw]
+            selection = input("Enter the number of your choice (1-7): ").strip()
+            if selection in input_options:
+                data_input = input_options[selection]
                 break
-            print("Invalid input. Please enter one of the listed options.")
+            print("Invalid input. Please enter a number from 1 to 7.")
 
         while True:
             mode = input("How would you like to group the data?\n"
@@ -209,7 +194,7 @@ def usr_graphs(usr_tickers):
                 data = yf.download(ticker_string, start=f'{year}-01-01', end=f'{year}-12-31')
 
             if data.empty:
-                print(f"Warning: No data found for {ticker_string} in {year}. Skipping.")
+                print(f"No data found for {ticker_string} in {year}. Skipping.")
                 continue
 
             data.index = pd.to_datetime(data.index)
@@ -227,7 +212,6 @@ def usr_graphs(usr_tickers):
                         open_ = data['Open']
                         close = data['Close']
 
-                    # user selected data
                     if data_input == 'High-low difference':
                         daily_values = high - low
                         label = "High-Low Diff"
@@ -241,7 +225,6 @@ def usr_graphs(usr_tickers):
                         daily_values = eval(data_input.lower())
                         label = f'{data_input} Value'
 
-                    # Filter and average
                     if mode == '1':
                         filtered = daily_values[daily_values.index.month == usr_month]
                         avg_value = filtered.mean()
@@ -261,37 +244,30 @@ def usr_graphs(usr_tickers):
 
         df = pd.DataFrame(all_data, columns=['Year', 'Ticker', label])
 
-        # Perform trend analysis
-        for ticker in df['Ticker'].unique():
+        for ticker in df['Ticker'].unique():  #calculates slope trend in data, outputs positive or negative slope
             ticker_data = df[df['Ticker'] == ticker]
             x = np.arange(len(ticker_data))
             y = ticker_data[label].values
-
             slope, _, _, _, _ = linregress(x, y)
-            trend_message = "upward" if slope > 0 else "downward" if slope < 0 else "flat"
+            trend_message = "Positive slope" if slope > 0 else "Negative slope" if slope < 0 else "flat"
             print(f"Trend for {ticker}: {trend_message} trend based on {label}.")
 
         df.set_index(['Year', 'Ticker'], inplace=True)
         df[label] = pd.to_numeric(df[label], errors='coerce')
         df.unstack('Ticker')[label].plot(marker='o', linestyle='-')
         plt.xlabel('Year' if mode == '1' else 'Year-Month')
-        plt.title(
-            f"{label} for {', '.join(tickers_list)} ",
-            fontsize=16
-        )
         plt.ylabel(label, fontsize=14)
+        plt.title(f"{label} for {', '.join(tickers_list)} ")
         plt.grid(which="major", color='k', linestyle='-.', linewidth=0.5)
         plt.xticks(rotation=45)
         plt.legend(title="Ticker")
         plt.tight_layout()
         plt.show()
-        plt.close()
 
         main(usr_tickers)
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-
 
 def usr_inputs(usr_tickers):
     while True:
@@ -323,6 +299,7 @@ def usr_inputs(usr_tickers):
 def main(user_info):
     try:
         usr_tickers = UserInfo(user_info)
+        searchable_tickers = pd.read_csv('nasdaq_screener_1745356200527.csv')
         print('---------------------------')
         print(usr_tickers)
         print('Type number for action: ')
@@ -343,7 +320,7 @@ def main(user_info):
         elif num == str(2):
             delete_ticker_menu(usr_tickers)
         elif num == str(3):
-            search_tickers()
+            search_tickers(searchable_tickers, usr_tickers)
         elif num == str(4):
             view_index(usr_tickers)
         elif num == str(5):
