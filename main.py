@@ -5,8 +5,8 @@ import pandas as pd
 from userInfoClass import UserInfo
 import numpy as np
 from scipy.stats import linregress
-import datetime
-from datetime import datetime
+from datetime import datetime, timedelta
+import mplfinance as mpf
 
 
 def get_financial_ratios(ticker_list):
@@ -112,15 +112,46 @@ def delete_ticker_menu(usr_tickers):
     while True:
         print("\nCurrent Tickers:", usr_tickers)
         ticker = input("Enter the ticker you want to remove: ").strip().upper()
-        usr_tickers.remove_ticker(ticker)
+        usr_tickers.remove(ticker)
 
-        if len(usr_tickers) == 0:
-            print("All tickers removed.")
-            main(usr_tickers)
+        # if len(usr_tickers) == 0:
+        #     print("All tickers removed.")
+        #     main(usr_tickers)
 
         again = input("Remove another? (Y/N): ").strip().upper()
         if again != 'Y':
             main(usr_tickers)
+
+
+def get_candlestick_graph(tickers_list):
+    end_date = datetime.today()
+    start_date = end_date - timedelta(days=365)
+
+    for ticker_symbol in tickers_list:
+        try:
+            data = yf.download(ticker_symbol, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
+            data = data.tail(120)
+
+            if data.empty:
+                print(f"No data found for {ticker_symbol}")
+                continue
+
+            if isinstance(data.columns, pd.MultiIndex):
+                data = data.xs(ticker_symbol, axis=1, level=1)
+
+            required_cols = ["Open", "High", "Low", "Close"]
+
+            data_clean = data.dropna(subset=required_cols)
+            for col in required_cols:
+                data_clean[col] = pd.to_numeric(data_clean[col], errors='coerce')
+
+            data_clean.index = pd.to_datetime(data_clean.index)
+
+            mpf.plot(data_clean, type='candle', style='charles', title=ticker_symbol, volume=True)
+
+        except Exception as e:
+            print(f"Error plotting {ticker_symbol}: {e}")
+
 
 
 def usr_graphs(usr_tickers):
@@ -128,7 +159,6 @@ def usr_graphs(usr_tickers):
         while True:
             start_year = input("Enter a start year (YYYY): ").strip()
             end_year = input("Enter an end year (YYYY or type 'current'): ").strip().lower()
-
             if start_year.isdigit() and (end_year.isdigit() or end_year == 'current'):
                 if end_year == 'current':
                     end_date = datetime.today().strftime('%Y-%m-%d')
@@ -136,10 +166,12 @@ def usr_graphs(usr_tickers):
                 else:
                     end_date = f"{end_year}-12-31"
                     end_year_int = int(end_year)
-
                 if int(start_year) < end_year_int:
                     break
             print("Invalid input. Make sure start year is before end year.")
+
+        print("What would you like to visualize?")
+        print("1 - High\n2 - Low\n3 - Open\n4 - Close\n5 - High-Low Difference\n6 - Close-Open Difference\n7 - Percent Change\n8 - Candlestick Graph")
 
         input_options = {
             '1': 'High',
@@ -148,18 +180,22 @@ def usr_graphs(usr_tickers):
             '4': 'Close',
             '5': 'High-low difference',
             '6': 'Close-open difference',
-            '7': 'Percent change'
+            '7': 'Percent change',
+            '8': 'Candlestick'
         }
 
-        print("What would you like to graph?")
-        print("1 - High\n2 - Low\n3 - Open\n4 - Close\n5 - High-Low Difference\n6 - Close-Open Difference\n7 - Percent Change")
-
         while True:
-            selection = input("Enter the number of your choice (1-7): ").strip()
+            selection = input("Enter the number of your choice (1-8): ").strip()
             if selection in input_options:
                 data_input = input_options[selection]
                 break
-            print("Invalid input. Please enter a number from 1 to 7.")
+            print("Invalid input. Please enter a number from 1 to 8.")
+
+        tickers_list = [usr_tickers.get_tickers(i) for i in range(len(usr_tickers))]
+
+        if data_input == 'Candlestick':
+            get_candlestick_graph(usr_tickers)
+            main(usr_tickers)
 
         while True:
             mode = input("How would you like to group the data?\n"
@@ -194,7 +230,7 @@ def usr_graphs(usr_tickers):
                 data = yf.download(ticker_string, start=f'{year}-01-01', end=f'{year}-12-31')
 
             if data.empty:
-                print(f"No data found for {ticker_string} in {year}. Skipping.")
+                print(f"Warning: No data found for {ticker_string} in {year}. Skipping.")
                 continue
 
             data.index = pd.to_datetime(data.index)
@@ -244,12 +280,12 @@ def usr_graphs(usr_tickers):
 
         df = pd.DataFrame(all_data, columns=['Year', 'Ticker', label])
 
-        for ticker in df['Ticker'].unique():  #calculates slope trend in data, outputs positive or negative slope
+        for ticker in df['Ticker'].unique():
             ticker_data = df[df['Ticker'] == ticker]
             x = np.arange(len(ticker_data))
             y = ticker_data[label].values
             slope, _, _, _, _ = linregress(x, y)
-            trend_message = "Positive slope" if slope > 0 else "Negative slope" if slope < 0 else "flat"
+            trend_message = "upward" if slope > 0 else "downward" if slope < 0 else "flat"
             print(f"Trend for {ticker}: {trend_message} trend based on {label}.")
 
         df.set_index(['Year', 'Ticker'], inplace=True)
@@ -271,7 +307,7 @@ def usr_graphs(usr_tickers):
 
 def usr_inputs(usr_tickers):
     while True:
-        usr_ticker = input("Enter a stock ticker (case-sensitive): ").strip().upper()
+        usr_ticker = input("Enter a stock ticker: ").strip().upper()
         if usr_ticker:
             usr_tickers.append(usr_ticker)
         else:
